@@ -1,0 +1,60 @@
+use esp_idf_hal::prelude::*;
+use esp_idf_sys as _; // Global initialization for ESP32
+use embedded_hal::digital::v2::OutputPin;
+use std::sync::{Arc, Mutex};
+use aes_gcm::{Aes256Gcm, Key, Nonce}; // Or another encryption library for Rust
+use aes_gcm::aead::{Aead, NewAead};
+
+// GPIO and display setup for Lilygo T-Display S3
+fn init_peripherals() -> Result<(), &'static str> {
+    // Initialize GPIO, SPI, I2C, etc., specific to Lilygo T-Display S3
+    // This is dependent on the esp-idf-hal crate and your board setup
+    Ok(())
+}
+
+// Securely store Nostr nsec (private keys)
+struct NostrBunker {
+    key_storage: Arc<Mutex<Vec<u8>>>,
+    aes_key: Key<Aes256Gcm>,
+}
+
+impl NostrBunker {
+    fn new(key: &[u8]) -> Self {
+        let aes_key = Key::from_slice(key);
+        NostrBunker {
+            key_storage: Arc::new(Mutex::new(vec![])),
+            aes_key: *aes_key,
+        }
+    }
+
+    fn store_key(&self, private_key: &[u8]) {
+        let nonce = Nonce::from_slice(b"unique nonce"); // Ensure to use a unique nonce per encryption
+        let cipher = Aes256Gcm::new(&self.aes_key);
+        let encrypted_key = cipher.encrypt(nonce, private_key).expect("encryption failure");
+        let mut storage = self.key_storage.lock().unwrap();
+        storage.extend(encrypted_key);
+    }
+
+    fn retrieve_key(&self, encrypted_key: &[u8]) -> Vec<u8> {
+        let nonce = Nonce::from_slice(b"unique nonce");
+        let cipher = Aes256Gcm::new(&self.aes_key);
+        cipher.decrypt(nonce, encrypted_key).expect("decryption failure")
+    }
+}
+
+fn main() {
+    esp_idf_sys::link_patches();
+    init_peripherals().expect("Failed to initialize peripherals");
+
+    let encryption_key = b"an example very very secret key.";
+    let nostr_bunker = NostrBunker::new(encryption_key);
+
+    // Example usage
+    let private_key = b"nostr_private_key";
+    nostr_bunker.store_key(private_key);
+
+    // Simulating retrieval
+    let storage = nostr_bunker.key_storage.lock().unwrap();
+    let decrypted_key = nostr_bunker.retrieve_key(&storage);
+    println!("Decrypted Key: {:?}", decrypted_key);
+} 
